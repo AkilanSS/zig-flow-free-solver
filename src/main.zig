@@ -3,17 +3,21 @@ const rl = @import("raylib");
 const rg = @import("raygui");
 const cfg = @import("config.zig");
 
-const Cell = struct {
+pub const Cell = struct {
     isTerminal: bool,
     color: u8,
     hasPipe: bool,
     id: i8,
 };
 
-const CellIndex = struct {
+pub const CellIndex = struct {
     i: u8,
     j: u8,
     color: u8,
+
+    fn fix(self: *CellIndex) void {
+        std.mem.swap(u8, &self.i, &self.j);
+    }
 };
 
 pub fn main() anyerror!void {
@@ -117,7 +121,21 @@ pub fn main() anyerror!void {
         }
 
         //Test render path
-        var temp_move: [6]CellIndex = [6]CellIndex{ CellIndex{ .i = 0, .j = 0, .color = 2 }, CellIndex{ .i = 1, .j = 0, .color = 2 }, CellIndex{ .i = 2, .j = 0, .color = 2 }, CellIndex{ .i = 3, .j = 0, .color = 2 }, CellIndex{ .i = 3, .j = 1, .color = 2 }, CellIndex{ .i = 2, .j = 1, .color = 2 } };
+        var temp_move = [_]CellIndex{
+            CellIndex{ .i = 0, .j = 0, .color = 2 },
+            CellIndex{ .i = 0, .j = 1, .color = 2 },
+            CellIndex{ .i = 1, .j = 1, .color = 2 },
+            CellIndex{ .i = 1, .j = 0, .color = 2 },
+            CellIndex{ .i = 2, .j = 0, .color = 2 },
+            CellIndex{ .i = 2, .j = 1, .color = 2 },
+            CellIndex{ .i = 2, .j = 2, .color = 2 },
+            CellIndex{ .i = 2, .j = 1, .color = 2 },
+        };
+
+        for (0..temp_move.len) |i| {
+            temp_move[i].fix();
+        }
+
         renderPath(&temp_move, grid, grid_x_corner, grid_y_corner, colorMap);
 
         rl.clearBackground(.white);
@@ -198,13 +216,13 @@ fn renderPath(path: []CellIndex, grid: [][]Cell, grid_x_corner: f32, grid_y_corn
                 .x = cfg.GRID_SIZE / 2.0,
                 .y = 20,
             }, colorMap.get(path[i].color).?);
-        } else if (pipe_orientation == 3) {
+        } else if (pipe_orientation == 3) { //Top to Bottom
             rl.drawRectangleV(rl.Vector2{
                 .x = prev_cell_coords[0] - 10,
-                .y = prev_cell_coords[1],
+                .y = prev_cell_coords[1] - 10,
             }, rl.Vector2{
                 .x = 20,
-                .y = cfg.GRID_SIZE / 2.0,
+                .y = cfg.GRID_SIZE / 2.0 + 10,
             }, colorMap.get(path[i].color).?);
 
             rl.drawRectangleV(rl.Vector2{
@@ -212,15 +230,15 @@ fn renderPath(path: []CellIndex, grid: [][]Cell, grid_x_corner: f32, grid_y_corn
                 .y = next_cell_coords[1] - cfg.GRID_SIZE / 2.0,
             }, rl.Vector2{
                 .x = 20,
-                .y = cfg.GRID_SIZE / 2.0,
+                .y = cfg.GRID_SIZE / 2.0 + 10,
             }, colorMap.get(path[i].color).?);
-        } else if (pipe_orientation == 4) {
+        } else if (pipe_orientation == 4) { //Bottom to Top
             rl.drawRectangleV(rl.Vector2{
                 .x = next_cell_coords[0] - 10,
-                .y = next_cell_coords[1],
+                .y = next_cell_coords[1] - 10,
             }, rl.Vector2{
                 .x = 20,
-                .y = cfg.GRID_SIZE / 2.0,
+                .y = cfg.GRID_SIZE / 2.0 + 10,
             }, colorMap.get(path[i].color).?);
 
             rl.drawRectangleV(rl.Vector2{
@@ -228,7 +246,7 @@ fn renderPath(path: []CellIndex, grid: [][]Cell, grid_x_corner: f32, grid_y_corn
                 .y = prev_cell_coords[1] - cfg.GRID_SIZE / 2.0,
             }, rl.Vector2{
                 .x = 20,
-                .y = cfg.GRID_SIZE / 2.0,
+                .y = cfg.GRID_SIZE / 2.0 + 10,
             }, colorMap.get(path[i].color).?);
         }
     }
