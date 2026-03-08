@@ -1,14 +1,11 @@
 puzzle = [
-    [0,0,0,0,0,0,0,1],
-    [0,0,0,3,5,0,0,2],
-    [0,0,0,0,0,6,0,0],
-    [0,0,6,0,0,0,0,0],
-    [0,3,5,0,4,0,0,0],
-    [0,4,0,0,0,0,0,1],
-    [0,2,0,0,0,0,0,0],
-    [0,0,0,0,0,0,0,0],
-]
-
+    [0,0,0,0,0,1],
+    [0,5,0,0,0,5],
+    [0,2,0,0,0,2],
+    [0,3,0,0,0,3],
+    [0,4,0,0,0,4],
+    [0,0,1,6,0,6]
+]   
 
 class Cell:
     def __init__(self):
@@ -84,16 +81,12 @@ currHeads = {k: positionMap[k][0] for k in range(1, K + 1)}
 mapPath = {k: [] for k in range(1, K + 1)}
 
 def solver(grid, currHeads, mapPath, cellsFilled):
-    #if hasDeadEnd(grid, currHeads):
-    #   return False
     if not currHeads:
         if cellsFilled == N**2:
             for row in grid: print(row)
-            print(mapPath)
             return True
         return False
     color = list(currHeads.keys())[0]
-    print(color)
     currMove = currHeads[color]
     target = targetMap[color]
     
@@ -104,83 +97,18 @@ def solver(grid, currHeads, mapPath, cellsFilled):
         
         if grid[nextMove.i][nextMove.j].isTerminal:
             if grid[nextMove.i][nextMove.j].color == color and nextMove.i == target.i and nextMove.j == target.j:
+                
                 currHeadsCopy = currHeads.copy()
-                newPath = mapPath[color] + [nextMove]
-                mapPathCopy = mapPath.copy()
-                mapPathCopy[color] = newPath
                 del currHeadsCopy[color]
-                if solver(grid, currHeadsCopy, mapPathCopy, cellsFilled):
+                if solver(grid, currHeadsCopy, mapPath, cellsFilled):
                     return True
             continue
         if not allowMove(grid, nextMove): continue
         grid[nextMove.i][nextMove.j].color = color
         currHeadsCopy = currHeads.copy()
-        newPath = mapPath[color] + [nextMove]
-        mapPathCopy = mapPath.copy()
-        mapPathCopy[color] = newPath
         currHeadsCopy[color] = nextMove
-        # print(cellsFilled)
-        # [print(row) for row in grid]
-        # print()
-        if solver(grid, currHeadsCopy, mapPathCopy, cellsFilled + 1): return True
+        if solver(grid, currHeadsCopy, mapPath, cellsFilled + 1): return True
         grid[nextMove.i][nextMove.j].color = -1
 
     return False
 solver(grid, currHeads, mapPath, 2 * K)
-
-def solver(grid, currHeads, mapPath, cellsFilled):
-    # Base Case: All colors have reached their targets
-    if not currHeads:
-        # Check if the entire grid is filled (common requirement for Flow puzzles)
-        if cellsFilled == N**2:
-            return mapPath
-        return None
-
-    color = list(currHeads.keys())[0]
-    currMove = currHeads[color]
-    target = targetMap[color]
-    
-    allNextMove = getNextMove(currMove)
-    
-    for nextMove in allNextMove:
-        if not checkBound(nextMove): 
-            continue
-        
-        # Scenario A: The next move is a terminal (endpoint)
-        if grid[nextMove.i][nextMove.j].isTerminal:
-            if grid[nextMove.i][nextMove.j].color == color and nextMove.i == target.i and nextMove.j == target.j:
-                currHeadsCopy = currHeads.copy()
-                newPath = mapPath[color] + [nextMove]
-                mapPathCopy = mapPath.copy()
-                mapPathCopy[color] = newPath
-                
-                # Remove this color as it's finished and move to the next color
-                del currHeadsCopy[color]
-                
-                result = solver(grid, currHeadsCopy, mapPathCopy, cellsFilled)
-                if result is not None:
-                    return result
-            continue
-        
-        # Scenario B: The next move is an empty cell
-        if not allowMove(grid, nextMove): 
-            continue
-            
-        # Backtracking step: Mark the grid
-        grid[nextMove.i][nextMove.j].color = color
-        
-        newPath = mapPath[color] + [nextMove]
-        mapPathCopy = mapPath.copy()
-        mapPathCopy[color] = newPath
-        
-        currHeadsCopy = currHeads.copy()
-        currHeadsCopy[color] = nextMove
-        
-        result = solver(grid, currHeadsCopy, mapPathCopy, cellsFilled + 1)
-        if result is not None:
-            return result
-            
-        # Backtrack: Reset the grid cell
-        grid[nextMove.i][nextMove.j].color = -1
-
-    return None

@@ -2,11 +2,23 @@ const std = @import("std");
 const rl = @import("raylib");
 const rg = @import("raygui");
 const cfg = @import("config.zig");
-const solver = @import("solver.zig");
-const types = @import("types.zig");
 
-const Cell = types.Cell;
-const CellIndex = types.CellIndex;
+pub const Cell = struct {
+    isTerminal: bool,
+    color: u8,
+    hasPipe: bool,
+    id: i8,
+};
+
+pub const CellIndex = struct {
+    i: u8,
+    j: u8,
+    color: u8,
+
+    fn fix(self: *CellIndex) void {
+        std.mem.swap(u8, &self.i, &self.j);
+    }
+};
 
 pub fn main() anyerror!void {
     var stdout_buf: [1024]u8 = undefined;
@@ -35,21 +47,20 @@ pub fn main() anyerror!void {
     }
 
     //Read the chosen level, and put it in an array
-    const level_choice: u8 = 3;
+    const level_choice: u8 = 2;
     var file_buffer: [1024]u8 = undefined;
     const level_file = fd_array.items[level_choice];
 
     var file_reader = level_file.reader(&file_buffer);
-    var grid = try parseBoard(&file_reader, allocator);
-    // std.debug.print("{any}\n", .{grid});
-    _ = &grid;
+    const grid = try parseBoard(&file_reader, allocator);
+    std.debug.print("{any}\n", .{grid});
+
     defer {
         for (grid) |row| allocator.free(row);
         allocator.free(grid);
     }
 
-    var colorMap = std.AutoArrayHashMap(i8, rl.Color).init(allocator);
-    defer colorMap.deinit();
+    var colorMap = std.AutoArrayHashMap(u8, rl.Color).init(allocator);
     try colorMap.put(0, rl.Color{ .r = 255, .g = 105, .b = 180, .a = 255 }); // Hot Pink
     try colorMap.put(1, rl.Color{ .r = 147, .g = 112, .b = 219, .a = 255 }); // Medium Purple
     try colorMap.put(2, rl.Color{ .r = 255, .g = 20, .b = 147, .a = 255 }); // Deep Pink
@@ -77,65 +88,12 @@ pub fn main() anyerror!void {
     try colorMap.put(24, rl.Color{ .r = 0, .g = 255, .b = 255, .a = 255 }); // Cyan
     try colorMap.put(25, rl.Color{ .r = 255, .g = 255, .b = 255, .a = 255 }); // White
 
-    var position_map = try getPositionMap(grid, allocator);
-    var target_map = std.AutoArrayHashMap(i8, CellIndex).init(allocator);
-    var curr_head = std.AutoArrayHashMap(i8, CellIndex).init(allocator);
-    var source_map = std.AutoArrayHashMap(i8, CellIndex).init(allocator);
-    defer target_map.deinit();
-    defer curr_head.deinit();
-    defer position_map.deinit();
-
-    var map_path = std.AutoArrayHashMap(i8, std.ArrayListUnmanaged(CellIndex)).init(allocator);
-    var terminal_count: u8 = 0;
-    {
-        var it = position_map.iterator();
-        while (it.next()) |entry| {
-            if (entry.key_ptr.* == -1) continue;
-
-            terminal_count += 2;
-
-            try target_map.put(entry.key_ptr.*, entry.value_ptr.*[1]);
-            try curr_head.put(entry.key_ptr.*, entry.value_ptr.*[0]);
-            try source_map.put(entry.key_ptr.*, entry.value_ptr.*[0]);
-            try map_path.put(entry.key_ptr.*, std.ArrayListUnmanaged(CellIndex).empty);
-        }
-    }
-
-    defer {
-        var path_it = map_path.iterator();
-        while (path_it.next()) |entry| entry.value_ptr.deinit(allocator);
-        map_path.deinit();
-    }
     cfg.N = grid[0].len;
     const total_size = cfg.GRID_SIZE * @as(f32, @floatFromInt(cfg.N));
     const x_center = cfg.WINDOW_WIDTH / 2.0;
     const y_center = cfg.WINDOW_LAYOUT_HEIGHT / 2.0;
     const grid_x_corner: f32 = x_center - cfg.GRID_SIZE * @as(f32, @floatFromInt(cfg.N)) / 2.0;
     const grid_y_corner: f32 = y_center - cfg.GRID_SIZE * @as(f32, @floatFromInt(cfg.N)) / 2.0;
-
-    for (grid) |row| {
-        for (row) |cell| {
-            if (cell.color == -1) std.debug.print(". ", .{}) else std.debug.print("{} ", .{cell.color});
-        }
-        std.debug.print("\n", .{});
-    }
-
-    const solved_path = (try solve(allocator, grid, &curr_head, target_map, &map_path, terminal_count)) orelse {
-        std.debug.print("Nop\n", .{});
-        return;
-    };
-
-    {
-        var it = solved_path.iterator();
-        while (it.next()) |entry| {
-            try solved_path.*.getPtr(entry.key_ptr.*).?.insert(allocator, 0, source_map.get(entry.key_ptr.*).?);
-            for (entry.value_ptr.items) |*cell| {
-                cell.fix();
-            }
-        }
-    }
-
-    std.debug.print("{any}\n", .{solved_path.*.get(1).?.items});
 
     rl.initWindow(cfg.WINDOW_WIDTH, cfg.WINDOW_HEIGHT, "Flow Free Solver");
     defer rl.closeWindow();
@@ -155,18 +113,31 @@ pub fn main() anyerror!void {
         //Below will draw the terminals in appropriate cells
         for (grid, 0..cfg.N) |row, i| {
             for (row, 0..cfg.N) |cell, j| {
-                if (!cell.isTerminal) continue;
+                if (cell.color == 0) continue;
                 const offset_x = @as(f32, @floatFromInt(j)) * cfg.GRID_SIZE;
                 const offset_y = @as(f32, @floatFromInt(i)) * cfg.GRID_SIZE;
                 rl.drawCircleV(rl.Vector2{ .x = grid_x_corner + offset_x + cfg.GRID_SIZE / 2.0, .y = grid_y_corner + offset_y + cfg.GRID_SIZE / 2 }, 20, colorMap.get(cell.color).?);
             }
         }
 
-        //renderPath(&temp_move, grid, grid_x_corner, grid_y_corner, colorMap);
-        var it = solved_path.iterator();
-        while (it.next()) |path| {
-            renderPath(path.value_ptr.*.items, grid, grid_x_corner, grid_y_corner, colorMap);
+        //Test render path
+        var temp_move = [_]CellIndex{
+            CellIndex{ .i = 0, .j = 0, .color = 2 },
+            CellIndex{ .i = 0, .j = 1, .color = 2 },
+            CellIndex{ .i = 1, .j = 1, .color = 2 },
+            CellIndex{ .i = 1, .j = 0, .color = 2 },
+            CellIndex{ .i = 2, .j = 0, .color = 2 },
+            CellIndex{ .i = 2, .j = 1, .color = 2 },
+            CellIndex{ .i = 2, .j = 2, .color = 2 },
+            CellIndex{ .i = 2, .j = 1, .color = 2 },
+        };
+
+        for (0..temp_move.len) |i| {
+            temp_move[i].fix();
         }
+
+        renderPath(&temp_move, grid, grid_x_corner, grid_y_corner, colorMap);
+
         rl.clearBackground(.white);
     }
 }
@@ -186,16 +157,14 @@ fn parseBoard(content: anytype, allocator: std.mem.Allocator) ![][]Cell {
         while (row_line.next()) |cell| {
             const fixed_cell = std.mem.trim(u8, cell, &std.ascii.whitespace);
             //std.debug.print("{s}\n", .{cell});
-            const raw_color = try std.fmt.parseInt(i8, fixed_cell, 10);
-            // Normalize empty cells: if the CSV uses 0 for empty, force it to -1
-            const final_color = if (raw_color == 0) -1 else raw_color;
-
-            try row_arr.append(allocator, .{
-                .color = final_color,
-                .hasPipe = false,
-                .isTerminal = final_color != -1,
-                .id = -1,
-            });
+            if (fixed_cell.len != 0) {
+                try row_arr.append(allocator, .{
+                    .color = try std.fmt.parseInt(u8, fixed_cell, 10),
+                    .hasPipe = false,
+                    .isTerminal = true,
+                    .id = -1,
+                });
+            }
         }
         try grid.append(allocator, try row_arr.toOwnedSlice(allocator));
     }
@@ -205,7 +174,6 @@ fn parseBoard(content: anytype, allocator: std.mem.Allocator) ![][]Cell {
 /// Takes a array of CellIndex, and draws a path along the indices
 fn renderPath(path: []CellIndex, grid: [][]Cell, grid_x_corner: f32, grid_y_corner: f32, colorMap: anytype) void {
     _ = grid;
-    if (path.len < 2) return;
     for (1..path.len) |i| {
         const prev_cell = path[i - 1];
         const curr_cell = path[i];
@@ -291,120 +259,4 @@ fn getPipeOrientation(a: CellIndex, b: CellIndex) u8 {
     if (a.j > b.j) return 4;
 
     return 0;
-}
-
-pub fn getPositionMap(grid: [][]types.Cell, allocator: std.mem.Allocator) !std.AutoHashMap(i8, [2]CellIndex) {
-    var position_map = std.AutoHashMap(i8, [2]CellIndex).init(allocator);
-    errdefer position_map.deinit();
-    for (grid, 0..) |row, r| {
-        for (row, 0..) |cell, c| {
-            if (cell.isTerminal) {
-                const current_pos = CellIndex{ .i = @intCast(r), .j = @intCast(c), .color = cell.color };
-                const gop = try position_map.getOrPut(cell.color);
-                if (!gop.found_existing) {
-                    gop.value_ptr.* = .{ current_pos, CellIndex{ .i = -1, .j = -1, .color = cell.color } };
-                } else {
-                    gop.value_ptr.*[1] = current_pos;
-                }
-            }
-        }
-    }
-    return position_map;
-}
-
-fn getNextMove(curr_cell: CellIndex) [4]CellIndex {
-    const x = curr_cell.i;
-    const y = curr_cell.j;
-    const color = curr_cell.color;
-
-    return [4]CellIndex{
-        CellIndex{
-            .i = x + 1, //Move Right
-            .j = y,
-            .color = color,
-        },
-        CellIndex{
-            .i = x - 1, //Move Left
-            .j = y,
-            .color = color,
-        },
-        CellIndex{
-            .i = x,
-            .j = y + 1, //Move Down
-            .color = color,
-        },
-        CellIndex{
-            .i = x,
-            .j = y - 1, //Move Top
-            .color = color,
-        },
-    };
-}
-
-fn checkBounds(move: CellIndex) bool {
-    if ((0 <= move.i and move.i < cfg.N) and (0 <= move.j and move.j < cfg.N)) return true;
-    return false;
-}
-
-fn allow(move: CellIndex, grid: [][]Cell) bool {
-    if (grid[@intCast(move.i)][@intCast(move.j)].color != -1) return false;
-    return true;
-}
-
-fn solve(
-    allocator: std.mem.Allocator,
-    grid: [][]Cell,
-    curr_head: *std.AutoArrayHashMap(i8, CellIndex),
-    target_map: std.AutoArrayHashMap(i8, CellIndex),
-    map_path: *std.AutoArrayHashMap(i8, std.ArrayListUnmanaged(CellIndex)), // Updated to Unmanaged
-    cells_filled: u8,
-) !?*std.AutoArrayHashMap(i8, std.ArrayListUnmanaged(CellIndex)) {
-    if (curr_head.count() == 0) {
-        if (cells_filled == cfg.N * cfg.N) return map_path;
-        return null;
-    }
-
-    var it = curr_head.iterator();
-    const entry = it.next() orelse return null;
-    const color = entry.key_ptr.*;
-
-    const curr_move = curr_head.get(color).?;
-    const target = target_map.get(color).?;
-    const path_list = map_path.getPtr(color).?;
-    const all_next_move = getNextMove(curr_move);
-
-    for (all_next_move) |next_move| {
-        if (!checkBounds(next_move)) continue;
-
-        // Reached the target terminal for this color
-        if (next_move.i == target.i and next_move.j == target.j) {
-            const removed = curr_head.fetchOrderedRemove(color).?;
-            try path_list.append(allocator, next_move);
-            if (try solve(allocator, grid, curr_head, target_map, map_path, cells_filled)) |res|
-                return res;
-
-            // Backtrack
-            try curr_head.put(removed.key, removed.value);
-            _ = path_list.pop();
-            continue;
-        }
-
-        // Skip non-empty cells
-        if (grid[@intCast(next_move.i)][@intCast(next_move.j)].color != -1) continue;
-
-        const old_head = curr_head.get(color).?;
-        grid[@intCast(next_move.i)][@intCast(next_move.j)].color = color;
-        try path_list.append(allocator, next_move);
-        try curr_head.put(color, next_move);
-
-        if (try solve(allocator, grid, curr_head, target_map, map_path, cells_filled + 1)) |res|
-            return res;
-
-        // Backtrack
-        grid[@intCast(next_move.i)][@intCast(next_move.j)].color = -1;
-        try curr_head.put(color, old_head);
-        _ = path_list.pop();
-    }
-
-    return null;
 }
