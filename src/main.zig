@@ -35,7 +35,7 @@ pub fn main() anyerror!void {
     }
 
     //Read the chosen level, and put it in an array
-    const level_choice: u8 = 3;
+    const level_choice: u8 = 0;
     var file_buffer: [1024]u8 = undefined;
     const level_file = fd_array.items[level_choice];
 
@@ -84,6 +84,7 @@ pub fn main() anyerror!void {
     defer target_map.deinit();
     defer curr_head.deinit();
     defer position_map.deinit();
+    defer source_map.deinit();
 
     var map_path = std.AutoArrayHashMap(i8, std.ArrayListUnmanaged(CellIndex)).init(allocator);
     var terminal_count: u8 = 0;
@@ -120,22 +121,44 @@ pub fn main() anyerror!void {
         std.debug.print("\n", .{});
     }
 
-    const solved_path = (try solve(allocator, grid, &curr_head, target_map, &map_path, terminal_count)) orelse {
+    var all_solved_path = std.ArrayList(std.AutoArrayHashMap(i8, std.ArrayList(CellIndex))).empty;
+    defer {
+        for (all_solved_path.items) |*map| {
+            var map_it = map.iterator();
+            while (map_it.next()) |entry| {
+                entry.value_ptr.deinit(allocator);
+            }
+            map.deinit();
+        }
+        all_solved_path.deinit(allocator);
+    }
+
+    const solved_path = try solve(allocator, grid, &curr_head, target_map, &map_path, terminal_count, &all_solved_path);
+    if (all_solved_path.items.len == 0) {
         std.debug.print("Nop\n", .{});
         return;
-    };
+    }
+    _ = solved_path;
+
+    std.debug.print("{any}\n", .{all_solved_path.items.len});
+
+    const one_path = all_solved_path.items[3];
 
     {
-        var it = solved_path.iterator();
+        var it = one_path.iterator();
         while (it.next()) |entry| {
-            try solved_path.*.getPtr(entry.key_ptr.*).?.insert(allocator, 0, source_map.get(entry.key_ptr.*).?);
+            try one_path.getPtr(entry.key_ptr.*).?.insert(allocator, 0, source_map.get(entry.key_ptr.*).?);
             for (entry.value_ptr.items) |*cell| {
                 cell.fix();
             }
         }
     }
 
-    std.debug.print("{any}\n", .{solved_path.*.get(1).?.items});
+    // for (all_solved_path.items) |path| {
+    //     std.debug.print("{any}\n", .{path.get(1).?.items});
+    // }
+
+    std.debug.print("{d}\n", .{all_solved_path.capacity});
 
     rl.initWindow(cfg.WINDOW_WIDTH, cfg.WINDOW_HEIGHT, "Flow Free Solver");
     defer rl.closeWindow();
@@ -163,10 +186,12 @@ pub fn main() anyerror!void {
         }
 
         //renderPath(&temp_move, grid, grid_x_corner, grid_y_corner, colorMap);
-        var it = solved_path.iterator();
-        while (it.next()) |path| {
-            renderPath(path.value_ptr.*.items, grid, grid_x_corner, grid_y_corner, colorMap);
+
+        var it = one_path.iterator();
+        while (it.next()) |cell| {
+            renderPath(cell.value_ptr.*.items, grid, grid_x_corner, grid_y_corner, colorMap);
         }
+
         rl.clearBackground(.white);
     }
 }
@@ -356,11 +381,25 @@ fn solve(
     grid: [][]Cell,
     curr_head: *std.AutoArrayHashMap(i8, CellIndex),
     target_map: std.AutoArrayHashMap(i8, CellIndex),
-    map_path: *std.AutoArrayHashMap(i8, std.ArrayListUnmanaged(CellIndex)), // Updated to Unmanaged
+    map_path: *std.AutoArrayHashMap(i8, std.ArrayListUnmanaged(CellIndex)),
     cells_filled: u8,
-) !?*std.AutoArrayHashMap(i8, std.ArrayListUnmanaged(CellIndex)) {
+    all_map_path: *std.ArrayListUnmanaged(std.AutoArrayHashMap(i8, std.ArrayListUnmanaged(CellIndex))),
+) !?*std.ArrayList(std.AutoArrayHashMap(i8, std.ArrayListUnmanaged(CellIndex))) {
     if (curr_head.count() == 0) {
-        if (cells_filled == cfg.N * cfg.N) return map_path;
+        if (cells_filled == cfg.N * cfg.N) {
+            var cloned_map = std.AutoArrayHashMap(i8, std.ArrayListUnmanaged(CellIndex)).init(allocator);
+
+            var it = map_path.iterator();
+            while (it.next()) |p_entry| {
+                const cloned_list = try p_entry.value_ptr.clone(allocator);
+                try cloned_map.put(p_entry.key_ptr.*, cloned_list);
+            }
+            try all_map_path.*.append(allocator, cloned_map);
+        }
+        return null;
+    }
+
+    if (hasDeadEnd(grid, curr_head, target_map)) {
         return null;
     }
 
@@ -380,8 +419,7 @@ fn solve(
         if (next_move.i == target.i and next_move.j == target.j) {
             const removed = curr_head.fetchOrderedRemove(color).?;
             try path_list.append(allocator, next_move);
-            if (try solve(allocator, grid, curr_head, target_map, map_path, cells_filled)) |res|
-                return res;
+            _ = try solve(allocator, grid, curr_head, target_map, map_path, cells_filled, all_map_path);
 
             // Backtrack
             try curr_head.put(removed.key, removed.value);
@@ -397,8 +435,7 @@ fn solve(
         try path_list.append(allocator, next_move);
         try curr_head.put(color, next_move);
 
-        if (try solve(allocator, grid, curr_head, target_map, map_path, cells_filled + 1)) |res|
-            return res;
+        _ = try solve(allocator, grid, curr_head, target_map, map_path, cells_filled + 1, all_map_path);
 
         // Backtrack
         grid[@intCast(next_move.i)][@intCast(next_move.j)].color = -1;
@@ -407,4 +444,47 @@ fn solve(
     }
 
     return null;
+}
+
+fn checkConnection(
+    grid: [][]Cell,
+    i: usize,
+    j: usize,
+    curr_head: *std.AutoArrayHashMap(i8, CellIndex),
+    target_map: std.AutoArrayHashMap(i8, CellIndex),
+) u8 {
+    const color = grid[i][j].color;
+
+    if (color == -1) return 1;
+
+    if (curr_head.contains(color)) {
+        const head = curr_head.get(color).?;
+        const target = target_map.get(color).?;
+        if ((head.i == i and head.j == j) or (target.i == i and target.j == j)) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+fn hasDeadEnd(
+    grid: [][]Cell,
+    curr_head: *std.AutoArrayHashMap(i8, CellIndex),
+    target_map: std.AutoArrayHashMap(i8, CellIndex),
+) bool {
+    const N = cfg.N;
+    for (0..N) |i| {
+        for (0..N) |j| {
+            if (grid[i][j].color != -1) continue;
+
+            var valid_connections: u8 = 0;
+            if (i > 0) valid_connections += checkConnection(grid, i - 1, j, curr_head, target_map);
+            if (i < N - 1) valid_connections += checkConnection(grid, i + 1, j, curr_head, target_map);
+            if (j > 0) valid_connections += checkConnection(grid, i, j - 1, curr_head, target_map);
+            if (j < N - 1) valid_connections += checkConnection(grid, i, j + 1, curr_head, target_map);
+
+            if (valid_connections < 2) return true;
+        }
+    }
+    return false;
 }
