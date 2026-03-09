@@ -142,7 +142,7 @@ pub fn main() anyerror!void {
 
     std.debug.print("{any}\n", .{all_solved_path.items.len});
 
-    const one_path = all_solved_path.items[3];
+    const one_path = getMaxPath(all_solved_path);
 
     {
         var it = one_path.iterator();
@@ -487,4 +487,39 @@ fn hasDeadEnd(
         }
     }
     return false;
+}
+
+fn getMaxPath(all_solved_path: std.ArrayList(std.AutoArrayHashMap(i8, std.ArrayList(CellIndex)))) std.AutoArrayHashMap(i8, std.ArrayList(CellIndex)) {
+    var maxNum: u16 = 0;
+    var bestPath: std.AutoArrayHashMap(i8, std.ArrayList(CellIndex)) = all_solved_path.items[0];
+
+    for (all_solved_path.items) |path| {
+        const pathNum = findNumberOfBends(path);
+        if (pathNum > maxNum) {
+            maxNum = pathNum;
+            bestPath = path;
+        }
+    }
+
+    return bestPath;
+}
+
+fn findNumberOfBends(path: std.AutoArrayHashMap(i8, std.ArrayList(CellIndex))) u16 {
+    var num: u16 = 0;
+    var it = path.iterator();
+    while (it.next()) |entry| {
+        const path_array = entry.value_ptr.*;
+        if (path_array.items.len < 3) continue;
+        for (0..path_array.items.len - 2) |i| {
+            if (isBend(path_array.items[i], path_array.items[i + 1], path_array.items[i + 2])) {
+                num += 1;
+            }
+        }
+    }
+    return num;
+}
+
+fn isBend(a: CellIndex, b: CellIndex, c: CellIndex) bool {
+    _ = b;
+    return (a.i != c.i) and (a.j != c.j);
 }
